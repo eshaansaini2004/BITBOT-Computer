@@ -1,0 +1,178 @@
+// Eshaan Saini 433009808
+
+CHIP CPU{
+
+    IN  fromM[16],          // M value input  (M = contents of RAM[Address])
+        In[16],    	        // Instruction for execution
+        Reset;              // Signals whether to re-start the current
+                            // program (Reset==1) or continue executing
+                            // the current program (Reset==0).
+
+    OUT toM[16],            // M value output
+        writeM,             // Write to M 
+        addressM[16],       // Address in data memory (of M)
+        PCOut[16];          // address of next instruction
+
+    PARTS:
+    // Instruction bits along with the inverted versions
+    DMux4Way(in=true, sel=In[14..15], a=Arithmetic, b=Logical, c=MemorBranch, d=IO);
+
+    // register should be loaded
+    //1. ADD R0, R1, R2 - Operation is R0=R1+R2 and bit encoding = 0000 000 001 010 XXX
+//2. ADDI R0, R1, 7 - Operation is R0 = R1+7 and bit encoding = 0001 000 001 000111
+//3. SUB R0, R1, R2 - Operation is R0=R1-R2 and bit encoding = 0010 000 001 010 XXX
+//4. SUBI R0, R1, 7 - Operation is R0 = R1-7 and bit encoding = 0011 000 001 000111
+//5. NAND R0, R1, R2 - Operation is R0=R1 NAND R2 and bit encoding = 0100 000 001 010 XXX
+//6. NOR R0, R1, R2 - Operation is R0=R1 NOR R2 and bit encoding = 0110 000 001 010 XXX
+//Memory
+//7. READ R0, R1 - Operation is R0=RAM[R1] and bit encoding = 1000 000 001 XXXXXX
+//12. INP R0 - Operation is R0 = RAM[<Keyboard Register Location>].
+
+//i.e. when either of the following four are true
+//In[15:14] = 00 for Arithmetic operations
+//In[15:14] = 01 for Logical operations
+//In[13:12] = 00 is READ
+//In[13:12] = 10 is INP (KEYBOARD)
+//OR the way below
+//if (OPCODE is Arithmetic) OR (OPCODE is Logical), or
+//if (OPCODE is Memory) AND (OPTYPE is READ), or
+//if (OPCODE is I/O) AND (OPTYPE is INP)
+
+
+    // 1. Register control //
+
+    Or(a=Arithmetic, b=Logical, out=regcheck1);
+
+    Or(a=In[13], b=In[12], out=readCheckHelper);
+    Not(in=readCheckHelper, out=readCheck);
+    And(a=MemorBranch, b=readCheck, out=regcheck2, out = read);
+
+    Not(in=In[12],out=ioHelper);
+    And(a = In[13],b=ioHelper,out=ioHelper2);
+    And(a=ioHelper2, b=IO, out=regcheck3, out = incheck);
+
+    Or(a=regcheck1, b=regcheck2, out=l1);
+    Or(a=regcheck3, b=l1, out=loadReg);
+    DMux8Way(in=loadReg, sel=In[9..11], a=loadR0, b=loadR1, c=loadR2, d=loadR3, e=loadR4, f=loadR5, g=loadR6, h=loadR7);
+
+    // so if is arithemetic or logical then you need to read from from alu output else you need to read from memory?
+    Or(a=Arithmetic, b=Logical, out=memcheck);
+    Mux16(a=fromM, b=aluOut, sel=memcheck, out=regIn);
+
+    // Register control //
+    Register(in=regIn, load=loadR0, out=r0);
+    Register(in=regIn, load=loadR1, out=r1);
+    Register(in=regIn, load=loadR2, out=r2);
+    Register(in=regIn, load=loadR3, out=r3);
+    Register(in=regIn, load=loadR4, out=r4);
+    Register(in=regIn, load=loadR5, out=r5);
+    Register(in=regIn, load=loadR6, out=r6);
+    Register(in=regIn, load=loadR7, out=r7);
+
+    
+    // 2. ALU  //
+
+    //should this line be at the end?
+    
+
+    Mux8Way16(a=r0, b=r1, c=r2, d=r3, e=r4, f=r5, g=r6, h=r7, sel=In[6..8], out=rx, out[0..7]=rxLow, out[8..15]=rxHigh);
+    Mux8Way16(a=r0, b=r1, c=r2, d=r3, e=r4, f=r5, g=r6, h=r7, sel=In[3..5], out=ry1);
+   // check if ry is a constant or is it a register
+   //Arithmetic: In[13] = 0 is ADD, In[13] = 1 is SUB
+    //Immediate Data: In[12] = 0 when no Immediate data is provided in
+    //the instruction, In[12] = 1 when Immediate data is provided in the instruction
+
+    // so if it is arithemtic and in[12] = 0 
+    //Not(in=In[12], out=checkImmediate1);
+    //And(a=Arithmetic, b=checkImmediate1, out=selRegorimmediate);
+    And(a=Arithmetic, b=In[12], out=selRegorimmediate);
+    Mux16(a=ry1, b[0..5]=In[0..5], b[6..15]=false, sel=selRegorimmediate, out=ry);
+
+    // ALU //
+    ALU(AluOp=In[12..15], x = rx, y = ry, AluOut = aluOut,overflow = waste);
+
+
+    // 3. Prepare the Memory Address addressM (in case of READ and Write and OUT), Memory Data toM (in case of Write or OUT)
+    // addressM //
+    //in case of read
+    // The address will be the the value from In[6..8] = rx 
+    // so rx contains the address in the MEMORY 
+    Mux16(a=false, b=rx, sel=read, out=addressM1);
+    
+
+    //in case of write the address will be the value from In[9..11] = rd and toM will be rx
+    // so rd contains the address where you need to write the values of rx 
+    Mux8Way16(a=r0, b=r1, c=r2, d=r3, e=r4, f=r5, g=r6, h=r7, sel=In[9..11], out=rd);
+    Not(in=In[12], out=address12andnot);
+    And(a=In[13], b=address12andnot, out=writeCheck);
+    And(a=MemorBranch, b=writeCheck, out=write);
+    //Mux16(a=false, b=rd, sel=write, out=addressM2);
+
+    // incase of out the address will also be rd
+    Or(a=In[13], b=In[12], out=outCheckHelper);
+    Not(in=outCheckHelper, out=outCheck1);
+    And(a=IO, b=outCheck1, out = outCheck);
+
+
+    //Or(a=outCheck, b=incheck, out=inoutCheck);
+    Or(a=write, b=outCheck, out=checkwriteorout);
+    Mux16(a=false, b=rd, sel=checkwriteorout, out=addressM2);
+// if read equals one then we take address m1 else if read = 0 then we take address m2
+    Mux16(a=addressM2, b=addressM1, sel=read, out=addressM3);
+    // this check if the IO and INP(keybaord) and if that is 1 then we manually mass the keyboard address
+    Mux16(a = false, b[15] = true, b[14]=false,b[13]=true,b[0..12]=false, sel = incheck, out = addresskey);
+    
+    Mux16(a=addressM3, b=addresskey, sel=incheck, out=addressM);
+
+    // toM //
+    //this value will always be In[6..8], just check if write or OUT
+    
+    Or(a=outCheck, b=write, out=seltoM);
+
+    Mux16(a=false, b=rx, sel=seltoM, out=toM);
+
+    // 4. Generate the writeM signal (memory write for RAM or Screen)
+    // writeM is true if it is a Memory Write operation or a Screen OUT operation
+    // writeM //
+
+    Mux(a=false, b=true, sel=seltoM, out=writeM);
+   
+
+
+    // writeM //
+    
+
+    
+    // 5. We load the PC with new value if there is a branch
+    // Branch can be conditional or unconditional
+    // Unconditional => In[15..12] = 1011
+    // Conditional => In[15..12] = 1001 && In[8..6]==000
+    // PC //
+
+    // if In[15..12] = 1011 jump to rd or 
+    // Conditional => In[15..12] = 1001 && In[8..6]==000 then jump to rd
+    // if In[15..12] = 1011 
+    And(a=In[13], b=In[12], out=directJumpOptype);
+    And(a=MemorBranch, b=directJumpOptype, out=directJump);
+
+    // IF In[15..12] = 1001 
+    Not(in=In[13], out=jumpHelper1);
+    And(a=jumpHelper1, b=In[12], out=conditionalJumpOptype);
+    And(a=MemorBranch, b=conditionalJumpOptype, out=condJumpHelper);
+
+    //If In[8..6]==000
+    Or8Way(in=rxLow, out=rxLowOr);
+    Or8Way(in=rxHigh, out=rxHighOr);
+    Or(a=rxLowOr, b=rxHighOr, out=rxIsNotZero);
+    Not(in=rxIsNotZero, out=rxIsZero);
+
+    And(a=rxIsZero, b=condJumpHelper, out=condJump);
+
+    Or(a=directJump, b=condJump, out=shouldjump);
+
+    PC(in=rd, load=shouldjump, inc=true, reset=Reset, out=PCOut);
+
+
+
+    // PC //
+} 
