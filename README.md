@@ -1,6 +1,6 @@
 # BITBOT Computer
 
-**Author:** Eshaan Saini (433009808)
+**Author:** Eshaan Saini 
 
 This repository contains the hardware description language (HDL) implementation for the BITBOT Computer, a 16-bit computer platform. The project involves building the core components—CPU, Data Memory, and the top-level Computer chip—from the ground up, capable of running programs written in the BITBOT machine language.
 
